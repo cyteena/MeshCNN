@@ -45,6 +45,7 @@ class ClassificationData(BaseDataset):
 
     @staticmethod
     def make_dataset_by_class(dir, class_to_idx, phase):
+        """Make a dataset of meshes from a directory structure."""
         meshes = []
         dir = os.path.expanduser(dir)
         for target in sorted(os.listdir(dir)):

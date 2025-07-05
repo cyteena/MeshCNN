@@ -4,29 +4,41 @@ from data import DataLoader
 from models import create_model
 from util.writer import Writer
 from test import run_test
+from tqdm import tqdm
+
+from logging import Logger
+
+
+
 
 if __name__ == '__main__':
     opt = TrainOptions().parse()
+    # import ipdb; ipdb.set_trace()  # noqa: E402
     dataset = DataLoader(opt)
     dataset_size = len(dataset)
     print('#training meshes = %d' % dataset_size)
 
     model = create_model(opt)
+    print("model finished")
     writer = Writer(opt)
     total_steps = 0
-
-    for epoch in range(opt.epoch_count, opt.niter + opt.niter_decay + 1):
+    # import ipdb; ipdb.set_trace()
+    for epoch in tqdm(range(opt.epoch_count, opt.niter + opt.niter_decay + 1)):
         epoch_start_time = time.time()
         iter_data_time = time.time()
         epoch_iter = 0
 
-        for i, data in enumerate(dataset):
+        for i, data in tqdm(enumerate(dataset), 
+                        desc=f"Epoch {epoch}", 
+                        leave=False):  # leave=False 表示完成后清除进度条
             iter_start_time = time.time()
             if total_steps % opt.print_freq == 0:
                 t_data = iter_start_time - iter_data_time
             total_steps += opt.batch_size
             epoch_iter += opt.batch_size
+            print("select the data")
             model.set_input(data)
+            print("optimize!")
             model.optimize_parameters()
 
             if total_steps % opt.print_freq == 0:
@@ -37,18 +49,19 @@ if __name__ == '__main__':
 
             if i % opt.save_latest_freq == 0:
                 print('saving the latest model (epoch %d, total_steps %d)' %
-                      (epoch, total_steps))
+                    (epoch, total_steps))
                 model.save_network('latest')
 
             iter_data_time = time.time()
+            
         if epoch % opt.save_epoch_freq == 0:
             print('saving the model at the end of epoch %d, iters %d' %
-                  (epoch, total_steps))
+                (epoch, total_steps))
             model.save_network('latest')
             model.save_network(epoch)
 
         print('End of epoch %d / %d \t Time Taken: %d sec' %
-              (epoch, opt.niter + opt.niter_decay, time.time() - epoch_start_time))
+            (epoch, opt.niter + opt.niter_decay, time.time() - epoch_start_time))
         model.update_learning_rate()
         if opt.verbose_plot:
             writer.plot_model_wts(model, epoch)

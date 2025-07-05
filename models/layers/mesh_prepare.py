@@ -5,6 +5,7 @@ import ntpath
 
 def fill_mesh(mesh2fill, file: str, opt):
     load_path = get_mesh_path(file, opt.num_aug)
+    # import ipdb; ipdb.set_trace()
     if os.path.exists(load_path):
         mesh_data = np.load(load_path, encoding='latin1', allow_pickle=True)
     else:
@@ -52,11 +53,13 @@ def from_scratch(file, opt):
     mesh_data.edge_lengths = None
     mesh_data.edge_areas = []
     mesh_data.vs, faces = fill_from_file(mesh_data, file)
+    # import ipdb; ipdb.set_trace()
     mesh_data.v_mask = np.ones(len(mesh_data.vs), dtype=bool)
     faces, face_areas = remove_non_manifolds(mesh_data, faces)
     if opt.num_aug > 1:
+        # import ipdb; ipdb.set_trace()
         faces = augmentation(mesh_data, opt, faces)
-    build_gemm(mesh_data, faces, face_areas)
+    build_gemm(mesh_data, faces, face_areas) # read this
     if opt.num_aug > 1:
         post_augmentation(mesh_data, opt)
     mesh_data.features = extract_features(mesh_data)
@@ -100,6 +103,7 @@ def remove_non_manifolds(mesh, faces):
         is_manifold = False
         for i in range(3):
             cur_edge = (face[i], face[(i + 1) % 3])
+            # it's weird here, because two faces has one common edge 
             if cur_edge in edges_set:
                 is_manifold = True
                 break
@@ -118,6 +122,10 @@ def build_gemm(mesh, faces, face_areas):
     gemm_edges: array (#E x 4) of the 4 one-ring neighbors for each edge
     sides: array (#E x 4) indices (values of: 0,1,2,3) indicating where an edge is in the gemm_edge entry of the 4 neighboring edges
     for example edge i -> gemm_edges[gemm_edges[i], sides[i]] == [i, i, i, i]
+    
+    mesh.gemm_edges[0] == array([  1,   2, 729, 650])
+    mesh.sides[0] == array([1, 0, 3, 2]) use this to go from neighbor edge back to original edge
+    mesh.gemm_edges[1] == array([  2,   0, 691,   5])
     """
     mesh.ve = [[] for _ in mesh.vs]
     edge_nb = []
@@ -239,7 +247,7 @@ def flip_edges(mesh, prct, faces):
             edge_info = edge_faces[edge_key]
             if edge_info[3] == -1:
                 continue
-            new_edge = tuple(sorted(list(set(faces[edge_info[2]]) ^ set(faces[edge_info[3]]))))
+            new_edge = tuple(sorted(list(set(faces[edge_info[2]]) ^ set(faces[edge_info[3]])))) # the difference set, find the new edge of two faces
             if new_edge in edges_dict:
                 continue
             new_faces = np.array(
@@ -248,9 +256,10 @@ def flip_edges(mesh, prct, faces):
                 del edges_dict[(edge_info[0], edge_info[1])]
                 edge_info[:2] = [new_edge[0], new_edge[1]]
                 edges_dict[new_edge] = edge_key
-                rebuild_face(faces[edge_info[2]], new_faces[0])
+                rebuild_face(faces[edge_info[2]], new_faces[0]) # change the third point 
                 rebuild_face(faces[edge_info[3]], new_faces[1])
                 for i, face_id in enumerate([edge_info[2], edge_info[3]]):
+                    # update the face id
                     cur_face = faces[face_id]
                     for j in range(3):
                         cur_edge = tuple(sorted((cur_face[j], cur_face[(j + 1) % 3])))

@@ -26,6 +26,7 @@ class MeshUnion:
 
     def rebuild_features_average(self, features, mask, target_edges):
         self.prepare_groups(features, mask)
+        import ipdb; ipdb.set_trace()
         fe = torch.matmul(features.squeeze(-1), self.groups)
         occurrences = torch.sum(self.groups, 0).expand(fe.shape)
         fe = fe / occurrences
@@ -42,3 +43,4 @@ class MeshUnion:
         if padding_a > 0:
             padding_a = ConstantPad2d((0, 0, 0, padding_a), 0)
             self.groups = padding_a(self.groups)
+                        
