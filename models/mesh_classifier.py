@@ -29,7 +29,7 @@ class ClassifierModel:
         self.nclasses = opt.nclasses
 
         # load/define networks
-        import ipdb; ipdb.set_trace()
+        # import ipdb; ipdb.set_trace()
         self.net = networks.define_classifier(opt.input_nc, opt.ncf, opt.ninput_edges, opt.nclasses, opt,
                                               self.gpu_ids, opt.arch, opt.init_type, opt.init_gain)
         self.net.train(self.is_train)
