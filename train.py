@@ -36,9 +36,7 @@ if __name__ == '__main__':
                 t_data = iter_start_time - iter_data_time
             total_steps += opt.batch_size
             epoch_iter += opt.batch_size
-            print("select the data")
             model.set_input(data)
-            print("optimize!")
             model.optimize_parameters()
 
             if total_steps % opt.print_freq == 0:
