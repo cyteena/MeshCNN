@@ -11,6 +11,7 @@ class Mesh:
 
     def __init__(self, file=None, opt=None, hold_history=False, export_folder=''):
         self.file = file
+        self.opt = opt
         self.vs = self.v_mask = self.filename = self.features = None
         self.edges = self.gemm_edges = self.sides = None
         self.edge_areas = []
@@ -18,23 +19,37 @@ class Mesh:
         self.faces = None
         self.face_areas = None
         fill_mesh(self, file, opt)
-        self.process(opt)
         self.export_folder = export_folder
         self.history_data = None
         if hold_history:
             self.init_history()
             
-    def process(self, opt):
+    def finalize(self, is_train=False):
+        """
+        --- Stage 2: Final Processing ---
+        这个方法负责（可选的）增强和所有后续的几何/特征计算。
+        它在每次 __getitem__ 调用时都会执行。
+        """
+        
+        # 步骤 A: 【核心】只有在训练模式下才进行随机数据增强
         faces = self.faces
-        if opt.num_aug > 1:
-            faces = augmentation(self, opt, faces)
-        
+        if is_train and self.opt.num_aug > 1:
+            # 这里的增强函数会随机修改 self.vs 和 faces
+            faces = augmentation(self, self.opt, faces)
+
+        # 步骤 B: 无论是否增强，都必须构建最终的几何结构
         build_gemm(self, faces, self.face_areas)
+
+        # 步骤 C: 后增强处理 (仅在增强后)
+        if is_train and self.opt.num_aug > 1:
+            post_augmentation(self, self.opt)
         
-        if opt.num_aug > 1:
-            post_augmentation(self, opt)
-        
+        # 步骤 D: 提取最终的特征
         self.features = extract_features(self)
+        
+        # 可选的导出逻辑
+        if self.export_folder is not None:
+            self.export()
         
 
     def extract_features(self):

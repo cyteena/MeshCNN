@@ -16,6 +16,7 @@ class ClassificationData(BaseDataset):
         self.paths = self.make_dataset_by_class(self.dir, self.class_to_idx, opt.phase)
         self.nclasses = len(self.classes)
         self.size = len(self.paths)
+        self.is_train = opt.is_train
         self.get_mean_std()
         # modify for network later.
         opt.nclasses = self.nclasses
@@ -25,6 +26,7 @@ class ClassificationData(BaseDataset):
         path = self.paths[index][0]
         label = self.paths[index][1]
         mesh = Mesh(file=path, opt=self.opt, hold_history=False, export_folder=self.opt.export_folder)
+        mesh.finalize(is_train=self.is_train)
         meta = {'mesh': mesh, 'label': label}
         # get edge features
         edge_features = mesh.extract_features()

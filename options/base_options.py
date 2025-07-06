@@ -37,6 +37,7 @@ class BaseOptions:
         self.parser.add_argument('--export_folder', type=str, default='', help='exports intermediate collapses to this folder')
         #
         self.initialized = True
+        self.is_train = True
 
     def parse(self):
         if not self.initialized:
