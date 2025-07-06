@@ -1,31 +1,83 @@
 import numpy as np
 import os
 import ntpath
+import tempfile
+import shutil
+import zipfile
 
+import os
+import zipfile
+import numpy as np
+import shutil
+# from filelock import FileLock  # 如果你希望上锁，可解除注释并 pip install filelock
+
+import os
+import zipfile
+import numpy as np
+import tempfile
+import shutil
 
 def fill_mesh(mesh2fill, file: str, opt):
     load_path = get_mesh_path(file, opt.num_aug)
-    # import ipdb; ipdb.set_trace()
+    cache_dir = os.path.dirname(load_path)
+    # 确保目录存在
+    os.makedirs(cache_dir, exist_ok=True)
+
+    # 如果缓存存在，尝试加载
     if os.path.exists(load_path):
-        mesh_data = np.load(load_path, encoding='latin1', allow_pickle=True)
+        try:
+            mesh_data = np.load(load_path, encoding='latin1', allow_pickle=True)
+        except zipfile.BadZipFile:
+            print(f"[警告] 缓存损坏，删除并重建：{load_path}")
+            os.remove(load_path)
+            return fill_mesh(mesh2fill, file, opt)
+
+    # 否则生成并写入
     else:
         mesh_data = from_scratch(file, opt)
-        np.savez_compressed(load_path, gemm_edges=mesh_data.gemm_edges, vs=mesh_data.vs, edges=mesh_data.edges,
-                            edges_count=mesh_data.edges_count, ve=mesh_data.ve, v_mask=mesh_data.v_mask,
-                            filename=mesh_data.filename, sides=mesh_data.sides,
-                            edge_lengths=mesh_data.edge_lengths, edge_areas=mesh_data.edge_areas,
-                            features=mesh_data.features)
-    mesh2fill.vs = mesh_data['vs']
-    mesh2fill.edges = mesh_data['edges']
-    mesh2fill.gemm_edges = mesh_data['gemm_edges']
+
+        # 在缓存目录里创建一个唯一的临时文件
+        fd, tmp_path = tempfile.mkstemp(prefix=os.path.basename(load_path), suffix=".npz.tmp", dir=cache_dir)
+        os.close(fd)  # 我们只要路径，后面让 numpy 写入
+
+        # 保存到临时文件
+        np.savez_compressed(
+            tmp_path,
+            gemm_edges=mesh_data.gemm_edges,
+            vs=mesh_data.vs,
+            edges=mesh_data.edges,
+            edges_count=mesh_data.edges_count,
+            ve=mesh_data.ve,
+            v_mask=mesh_data.v_mask,
+            filename=mesh_data.filename,
+            sides=mesh_data.sides,
+            edge_lengths=mesh_data.edge_lengths,
+            edge_areas=mesh_data.edge_areas,
+            features=mesh_data.features
+        )
+
+        # 原子替换：将 tmp_path 覆盖到 load_path
+        try:
+            os.replace(tmp_path, load_path)
+        except Exception:
+            # 如果替换失败，清理临时文件并报错
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise RuntimeError(f"无法将临时缓存移动到目标位置：{tmp_path} -> {load_path}")
+
+    # 最后将数据注入 mesh2fill
+    mesh2fill.vs          = mesh_data['vs']
+    mesh2fill.edges       = mesh_data['edges']
+    mesh2fill.gemm_edges  = mesh_data['gemm_edges']
     mesh2fill.edges_count = int(mesh_data['edges_count'])
-    mesh2fill.ve = mesh_data['ve']
-    mesh2fill.v_mask = mesh_data['v_mask']
-    mesh2fill.filename = str(mesh_data['filename'])
-    mesh2fill.edge_lengths = mesh_data['edge_lengths']
-    mesh2fill.edge_areas = mesh_data['edge_areas']
-    mesh2fill.features = mesh_data['features']
-    mesh2fill.sides = mesh_data['sides']
+    mesh2fill.ve          = mesh_data['ve']
+    mesh2fill.v_mask      = mesh_data['v_mask']
+    mesh2fill.filename    = str(mesh_data['filename'])
+    mesh2fill.edge_lengths= mesh_data['edge_lengths']
+    mesh2fill.edge_areas  = mesh_data['edge_areas']
+    mesh2fill.features    = mesh_data['features']
+    mesh2fill.sides       = mesh_data['sides']
+
 
 def get_mesh_path(file: str, num_aug: int):
     filename, _ = os.path.splitext(file)
