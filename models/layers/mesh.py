@@ -4,22 +4,38 @@ import torch
 import numpy as np
 import os
 from models.layers.mesh_union import MeshUnion
-from models.layers.mesh_prepare import fill_mesh
+from models.layers.mesh_prepare import fill_mesh, augmentation, build_gemm, post_augmentation, extract_features
 
 
 class Mesh:
 
     def __init__(self, file=None, opt=None, hold_history=False, export_folder=''):
-        self.vs = self.v_mask = self.filename = self.features = self.edge_areas = None
+        self.file = file
+        self.vs = self.v_mask = self.filename = self.features = None
         self.edges = self.gemm_edges = self.sides = None
+        self.edge_areas = []
         self.pool_count = 0
-        # import ipdb; ipdb.set_trace()
+        self.faces = None
+        self.face_areas = None
         fill_mesh(self, file, opt)
+        self.process(opt)
         self.export_folder = export_folder
         self.history_data = None
         if hold_history:
             self.init_history()
-        self.export()
+            
+    def process(self, opt):
+        faces = self.faces
+        if opt.num_aug > 1:
+            faces = augmentation(self, opt, faces)
+        
+        build_gemm(self, faces, self.face_areas)
+        
+        if opt.num_aug > 1:
+            post_augmentation(self, opt)
+        
+        self.features = extract_features(self)
+        
 
     def extract_features(self):
         return self.features

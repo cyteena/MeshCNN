@@ -16,78 +16,104 @@ import zipfile
 import numpy as np
 import tempfile
 import shutil
+from filelock import FileLock
+
+# 文件：models/layers/mesh_prepare.py
+# In models/layers/mesh_prepare.py
+# Make sure you have 'import shutil' and 'from filelock import FileLock'
 
 def fill_mesh(mesh2fill, file: str, opt):
-    load_path = get_mesh_path(file, opt.num_aug)
-    cache_dir = os.path.dirname(load_path)
-    # 确保目录存在
-    os.makedirs(cache_dir, exist_ok=True)
+    """Loads data from a directory of separated cache files."""
+    model_cache_dir = get_mesh_path(file, opt.num_aug)
+    lock_path = model_cache_dir + ".lock"
+    lock = FileLock(lock_path)
 
-    # 如果缓存存在，尝试加载
-    if os.path.exists(load_path):
-        try:
-            mesh_data = np.load(load_path, encoding='latin1', allow_pickle=True)
-        except zipfile.BadZipFile:
-            print(f"[警告] 缓存损坏，删除并重建：{load_path}")
-            os.remove(load_path)
-            return fill_mesh(mesh2fill, file, opt)
+    mesh_data = None
+    with lock:
+        if os.path.isdir(model_cache_dir):
+            try:
+                class LoadedCache:
+                    pass
+                
+                loaded_data = LoadedCache()
+                loaded_data.vs = np.load(os.path.join(model_cache_dir, 'vs.npy'))
+                loaded_data.faces = np.load(os.path.join(model_cache_dir, 'faces.npy'))
+                loaded_data.v_mask = np.load(os.path.join(model_cache_dir, 'v_mask.npy'))
+                loaded_data.face_areas = np.load(os.path.join(model_cache_dir, 'face_areas.npy'))
+                with open(os.path.join(model_cache_dir, 'filename.txt'), 'r') as f:
+                    loaded_data.filename = f.read()
+                
+                mesh_data = loaded_data
 
-    # 否则生成并写入
-    else:
-        mesh_data = from_scratch(file, opt)
+            except Exception as e:
+                print(f"[警告] 缓存目录不完整或损坏，将被重建: {model_cache_dir}")
+                print(f"[error's type]{type(e).__name__}, [error's info]{e}")
+                if os.path.exists(model_cache_dir):
+                    shutil.rmtree(model_cache_dir)
+                mesh_data = create_and_save_cache(file, opt, model_cache_dir)
+        else:
+            mesh_data = create_and_save_cache(file, opt, model_cache_dir)
 
-        # 在缓存目录里创建一个唯一的临时文件
-        fd, tmp_path = tempfile.mkstemp(prefix=os.path.basename(load_path), suffix=".npz.tmp", dir=cache_dir)
-        os.close(fd)  # 我们只要路径，后面让 numpy 写入
+    # Injection logic is now simpler because mesh_data is always a consistent object
+    mesh2fill.vs = mesh_data.vs
+    mesh2fill.faces = mesh_data.faces
+    mesh2fill.v_mask = mesh_data.v_mask
+    mesh2fill.face_areas = mesh_data.face_areas
+    mesh2fill.filename = mesh_data.filename
 
-        # 保存到临时文件
-        np.savez_compressed(
-            tmp_path,
-            gemm_edges=mesh_data.gemm_edges,
-            vs=mesh_data.vs,
-            edges=mesh_data.edges,
-            edges_count=mesh_data.edges_count,
-            ve=mesh_data.ve,
-            v_mask=mesh_data.v_mask,
-            filename=mesh_data.filename,
-            sides=mesh_data.sides,
-            edge_lengths=mesh_data.edge_lengths,
-            edge_areas=mesh_data.edge_areas,
-            features=mesh_data.features
-        )
+# 将创建和保存逻辑提取到一个辅助函数中，使代码更清晰
+# In models/layers/mesh_prepare.py
+# Make sure you have 'import shutil' at the top of the file
 
-        # 原子替换：将 tmp_path 覆盖到 load_path
-        try:
-            os.replace(tmp_path, load_path)
-        except Exception:
-            # 如果替换失败，清理临时文件并报错
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-            raise RuntimeError(f"无法将临时缓存移动到目标位置：{tmp_path} -> {load_path}")
+def create_and_save_cache(file, opt, model_cache_dir):
+    """Saves each piece of data as a separate file to avoid pickle."""
+    print(f"Cache directory not found or corrupt, generating: {model_cache_dir}")
+    mesh_data = from_scratch(file, opt)
 
-    # 最后将数据注入 mesh2fill
-    mesh2fill.vs          = mesh_data['vs']
-    mesh2fill.edges       = mesh_data['edges']
-    mesh2fill.gemm_edges  = mesh_data['gemm_edges']
-    mesh2fill.edges_count = int(mesh_data['edges_count'])
-    mesh2fill.ve          = mesh_data['ve']
-    mesh2fill.v_mask      = mesh_data['v_mask']
-    mesh2fill.filename    = str(mesh_data['filename'])
-    mesh2fill.edge_lengths= mesh_data['edge_lengths']
-    mesh2fill.edge_areas  = mesh_data['edge_areas']
-    mesh2fill.features    = mesh_data['features']
-    mesh2fill.sides       = mesh_data['sides']
+    tmp_dir = model_cache_dir + ".tmp" + str(np.random.randint(100000))
+    os.makedirs(tmp_dir, exist_ok=True)
 
+    try:
+        np.save(os.path.join(tmp_dir, 'vs.npy'), mesh_data.vs)
+        np.save(os.path.join(tmp_dir, 'faces.npy'), mesh_data.faces)
+        np.save(os.path.join(tmp_dir, 'v_mask.npy'), mesh_data.v_mask)
+        np.save(os.path.join(tmp_dir, 'face_areas.npy'), mesh_data.face_areas)
+        with open(os.path.join(tmp_dir, 'filename.txt'), 'w') as f:
+            f.write(mesh_data.filename)
+        
+        if os.path.exists(model_cache_dir):
+             shutil.rmtree(model_cache_dir)
+        os.rename(tmp_dir, model_cache_dir)
+
+    except Exception as e:
+        if os.path.exists(tmp_dir):
+            shutil.rmtree(tmp_dir)
+        raise RuntimeError(f"Failed to create or save cache for {file}: {e}")
+
+    # To maintain a consistent return type, we load what we just saved.
+    class LoadedCache:
+        pass
+    
+    loaded_data = LoadedCache()
+    loaded_data.vs = np.load(os.path.join(model_cache_dir, 'vs.npy'))
+    loaded_data.faces = np.load(os.path.join(model_cache_dir, 'faces.npy'))
+    loaded_data.v_mask = np.load(os.path.join(model_cache_dir, 'v_mask.npy'))
+    loaded_data.face_areas = np.load(os.path.join(model_cache_dir, 'face_areas.npy'))
+    with open(os.path.join(model_cache_dir, 'filename.txt'), 'r') as f:
+        loaded_data.filename = f.read()
+
+    return loaded_data
+# In models/layers/mesh_prepare.py
 
 def get_mesh_path(file: str, num_aug: int):
+    """Returns a directory path for storing separated cache files."""
     filename, _ = os.path.splitext(file)
     dir_name = os.path.dirname(filename)
     prefix = os.path.basename(filename)
-    load_dir = os.path.join(dir_name, 'cache')
-    load_file = os.path.join(load_dir, '%s_%03d.npz' % (prefix, np.random.randint(0, num_aug)))
-    if not os.path.isdir(load_dir):
-        os.makedirs(load_dir, exist_ok=True)
-    return load_file
+    cache_root = os.path.join(dir_name, 'cache')
+    os.makedirs(cache_root, exist_ok=True)
+    model_cache_dir = os.path.join(cache_root, prefix)
+    return model_cache_dir
 
 def from_scratch(file, opt):
 
@@ -107,14 +133,15 @@ def from_scratch(file, opt):
     mesh_data.vs, faces = fill_from_file(mesh_data, file)
     # import ipdb; ipdb.set_trace()
     mesh_data.v_mask = np.ones(len(mesh_data.vs), dtype=bool)
-    faces, face_areas = remove_non_manifolds(mesh_data, faces)
-    if opt.num_aug > 1:
-        # import ipdb; ipdb.set_trace()
-        faces = augmentation(mesh_data, opt, faces)
-    build_gemm(mesh_data, faces, face_areas) # read this
-    if opt.num_aug > 1:
-        post_augmentation(mesh_data, opt)
-    mesh_data.features = extract_features(mesh_data)
+    mesh_data.faces, mesh_data.face_areas = remove_non_manifolds(mesh_data, faces)
+    # we keep the basic dealing pipeline
+    # if opt.num_aug > 1:
+    #     # import ipdb; ipdb.set_trace()
+    #     faces = augmentation(mesh_data, opt, faces)
+    # build_gemm(mesh_data, faces, face_areas) # read this
+    # if opt.num_aug > 1:
+    #     post_augmentation(mesh_data, opt)
+    # mesh_data.features = extract_features(mesh_data)
     return mesh_data
 
 def fill_from_file(mesh, file):
